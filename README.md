@@ -16,7 +16,7 @@ java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -sharedDb
 aws dynamodb create-table --cli-input-json file://create-table.json --endpoint-url http://localhost:8000
 
 # Ejecutar aplicación
-mvn spring-boot:run
+.\mvnw spring-boot:run
 ```
 
 ## Docker
