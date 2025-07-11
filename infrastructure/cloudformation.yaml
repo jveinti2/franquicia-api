@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura DynamoDB para Sistema de Franquicias'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Ambiente de despliegue
+
+  ApplicationName:
+    Type: String
+    Default: franquicia-system
+    Description: Nombre de la aplicación
+
+Resources:
+  # Tabla principal usando Single Table Design
+  FranquiciaTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ApplicationName}-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      
+      # Definición de claves
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      
+      # Global Secondary Indexes
+      GlobalSecondaryIndexes:
+        # GSI1: Para consultas por franquicia
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        
+        # GSI2: Para consultas por sucursal
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      
+ 
+      
+      # Configuración de stream para auditoria
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      
+      # Tags
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Rol IAM para la aplicación
+  ApplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ApplicationName}-${Environment}-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ecs-tasks.amazonaws.com
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt FranquiciaTable.Arn
+                  - !Sub '${FranquiciaTable.Arn}/index/*'
+
+  # CloudWatch Log Group
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/application/${ApplicationName}-${Environment}'
+      RetentionInDays: 30
+
+  # Lambda function para inicializar datos (opcional)
+  DataInitializerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ApplicationName}-${Environment}-initializer'
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt ApplicationRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FranquiciaTable
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          
+          def handler(event, context):
+              # Función para inicializar datos de ejemplo
+              dynamodb = boto3.resource('dynamodb')
+              table = dynamodb.Table(event['TABLE_NAME'])
+              
+              # Aquí puedes agregar datos de ejemplo
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Datos inicializados correctamente')
+              }
+
+Outputs:
+  TableName:
+    Description: Nombre de la tabla DynamoDB
+    Value: !Ref FranquiciaTable
+    Export:
+      Name: !Sub '${ApplicationName}-${Environment}-table-name'
+  
+  TableArn:
+    Description: ARN de la tabla DynamoDB
+    Value: !GetAtt FranquiciaTable.Arn
+    Export:
+      Name: !Sub '${ApplicationName}-${Environment}-table-arn'
+  
+  ApplicationRoleArn:
+    Description: ARN del rol IAM para la aplicación
+    Value: !GetAtt ApplicationRole.Arn
+    Export:
+      Name: !Sub '${ApplicationName}-${Environment}-role-arn'
+  
+  LogGroupName:
+    Description: Nombre del grupo de logs
+    Value: !Ref ApplicationLogGroup
+    Export:
+      Name: !Sub '${ApplicationName}-${Environment}-log-group'
